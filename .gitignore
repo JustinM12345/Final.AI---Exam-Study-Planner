@@ -5,3 +5,5 @@ uploaded_files/
 .DS_Store
 check_models.__pycache__
 check_models.py
+final_study_plan.json
+final_study_plan.md

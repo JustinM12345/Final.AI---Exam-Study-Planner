@@ -9,7 +9,6 @@ api_key = os.getenv("GOOGLE_API_KEY")
 
 if api_key:
     genai.configure(api_key=api_key)
-    # Using the smart model to handle complex logic
     model = genai.GenerativeModel(
         model_name="gemini-3-flash-preview", 
         generation_config={"response_mime_type": "application/json"}
@@ -54,7 +53,7 @@ Your goal is to create a realistic, personalized itinerary that respects the use
 def generate_schedule(all_course_data, start_date, end_date, user_constraints="None"):
     print(f"  -> Agent 3 (Scheduler): Building plan from {start_date} to {end_date}...")
     
-    # 1. Get Today's Date for context
+    # 1. Grabbing current date for context
     today = datetime.date.today().strftime("%Y-%m-%d")
     
     # 2. Prepare the Task List
@@ -62,7 +61,6 @@ def generate_schedule(all_course_data, start_date, end_date, user_constraints="N
     for course_entry in all_course_data:
         c_name = course_entry['course']
         analysis = course_entry['analysis']
-        # Fix for the List vs Dict bug
         if isinstance(analysis, list): analysis = analysis[0]
         
         topics = analysis.get('topics', [])
@@ -71,7 +69,7 @@ def generate_schedule(all_course_data, start_date, end_date, user_constraints="N
         for t in topics:
             tasks_summary += f" - {t['topic']} (Need: {t['est_hours']}h) [High Focus: {t.get('high_focus')}]\n"
 
-    # 3. Build the Prompt
+    # 3. Building final prompt
     user_prompt = f"""
     CURRENT DATE: {today}
     PLANNING RANGE: {start_date} to {end_date}
