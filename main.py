@@ -1,20 +1,36 @@
 import os
 import json
 import datetime
+import time
 
 # --- IMPORTS ---
+# Ensure your file is named 'agent4_confirming.py' based on your previous message
 from agent1_sorter import sort_files, extract_header_text
 from agent2_ranking import analyze_course
 from agent3_scheduler import generate_schedule
+from agent4_confirming import audit_schedule 
 
-def save_as_markdown(schedule_data, filename="final_study_plan.md"):
+def save_as_markdown(schedule_data, audit_feedback, filename="final_study_plan.md"):
     """
     Converts the JSON schedule into a pretty Markdown table.
+    Includes the Final Audit Report at the top.
     """
     with open(filename, "w") as f:
         f.write("# 📅 Final Exam Study Plan\n\n")
         
-        if "schedule" not in schedule_data:
+        # --- WRITE AUDIT REPORT ---
+        f.write("### 🛡️ Auditor Report (Agent 4)\n")
+        
+        # Check if the feedback indicates approval
+        if "approved" in audit_feedback.lower() or "looks good" in audit_feedback.lower() or "valid" in audit_feedback.lower():
+            f.write(f"> ✅ **STATUS: PASS**\n> {audit_feedback}\n")
+        else:
+            f.write(f"> ⚠️ **STATUS: PASSED WITH WARNINGS**\n> {audit_feedback}\n")
+        
+        f.write("\n---\n")
+        # --------------------------
+        
+        if "schedule" not in schedule_data or not schedule_data["schedule"]:
             f.write("No schedule generated.")
             return
 
@@ -41,6 +57,7 @@ def save_as_markdown(schedule_data, filename="final_study_plan.md"):
                 elif "MEAL" in type_: icon = "🍽️"
                 elif "PERSONAL" in type_: icon = "🛌"
                 elif "REVIEW" in type_: icon = "🧠"
+                elif "WAKE" in type_: icon = "☀️"
                 
                 f.write(f"| **{time}** | {icon} {type_} | {task} |\n")
             
@@ -50,7 +67,7 @@ def save_as_markdown(schedule_data, filename="final_study_plan.md"):
 
 def main():
     print("\n===========================================")
-    print("   🎓  FINAL.AI - FULL SYSTEM RUN  🎓")
+    print("   🎓  FINAL.AI - SELF-HEALING SYSTEM  🎓")
     print("===========================================\n")
     
     # --- STEP 0: SETUP ---
@@ -77,6 +94,7 @@ def main():
     if user_constraints.strip() == "":
         user_constraints = "None"
 
+    # Default end date: 14 days from now
     default_end = (datetime.date.today() + datetime.timedelta(days=14)).strftime("%Y-%m-%d")
     end_date = input(f"3. Target End Date (YYYY-MM-DD) [Default: {default_end}]: ")
     if end_date.strip() == "":
@@ -98,6 +116,7 @@ def main():
     print("\n🧠 AGENT 2: Analyzing Content & Estimating Time...")
     
     all_course_data = []
+    # Create a simple string list of courses for relative difficulty scaling
     course_list_str = ", ".join([c for c in sorted_courses.keys() if c != "General_Items"])
     
     for i, (course_name, file_paths) in enumerate(sorted_courses.items()):
@@ -114,6 +133,7 @@ def main():
             structured_context += raw_text
             structured_context += f"\n=== END OF DOCUMENT: {filename} ===\n"
 
+        # Call Agent 2
         difficulty_data = analyze_course(course_name, structured_context, course_list_str, user_constraints)
         
         all_course_data.append({
@@ -121,29 +141,50 @@ def main():
             "analysis": difficulty_data
         })
 
-    # --- STEP 4: RUN AGENT 3 (The Scheduler) ---
-    print(f"\n🗓️  AGENT 3: Building Calendar ({start_date} to {end_date})...")
+    # --- STEP 4: THE SELF-HEALING LOOP (Agent 3 + Agent 4) ---
+    print(f"\n🗓️  AGENT 3 & 4: Building & Auditing Calendar...")
     
-    final_schedule = generate_schedule(all_course_data, start_date, end_date, user_constraints)
+    max_retries = 3
+    attempt = 1
+    is_valid = False
+    current_constraints = user_constraints # Start with basic user rules
+    final_schedule = {}
+    last_feedback = ""
+
+    while attempt <= max_retries and not is_valid:
+        print(f"\n   🔄 Attempt {attempt}/{max_retries}: Generating Schedule...")
+        
+        # 1. Run Scheduler (Agent 3)
+        final_schedule = generate_schedule(all_course_data, start_date, end_date, current_constraints)
+        
+        # 2. Run Auditor (Agent 4)
+        # CRITICAL UPDATE: We pass 'all_course_data' so Agent 4 knows what courses are REQUIRED.
+        is_valid, feedback = audit_schedule(final_schedule, current_constraints, all_course_data)
+        
+        last_feedback = feedback
+        
+        if not is_valid:
+            print(f"      ⚠️ Auditor Rejected: {feedback}")
+            print("      🔧 Agent 4 is rewriting instructions for Agent 3...")
+            
+            # THE FEEDBACK LOOP: Pass the Auditor's specific complaints as new constraints
+            # This forces Agent 3 to fix exactly what Agent 4 complained about.
+            current_constraints += f" [IMPORTANT CORRECTION FROM AUDITOR: {feedback}]"
+            attempt += 1
+        else:
+            print("      ✅ Auditor Approved!")
+
+    # --- STEP 5: SAVE RESULTS ---
+    print("\n💾 Saving Final Plan...")
     
-    # --- STEP 5: SAVE RESULTS (JSON + MARKDOWN) ---
-    print("\n💾 Saving Study Plan...")
-    
-    # 1. Save Raw JSON (Good for debugging)
+    # 1. Save Raw JSON (Useful for debugging)
     with open("final_study_plan.json", "w") as f:
         json.dump(final_schedule, f, indent=2)
 
-    # 2. Save Markdown (MEETS REQUIREMENT)
-    save_as_markdown(final_schedule, "final_study_plan.md")
+    # 2. Save Markdown with Audit Report (The requirement)
+    save_as_markdown(final_schedule, last_feedback, "final_study_plan.md")
     
-    # Optional: Preview
-    if "schedule" in final_schedule and len(final_schedule["schedule"]) > 0:
-        first_day = final_schedule["schedule"][0]
-        print(f"\n👀 PREVIEW (Day 1 - {first_day.get('date')}):")
-        for event in first_day.get('events', []):
-            print(f"   - [{event.get('time')}] {event.get('task')}")
-    else:
-        print("⚠️ Warning: Schedule appears empty.")
+    print("Done!")
 
 if __name__ == "__main__":
     main()
