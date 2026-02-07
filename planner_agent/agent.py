@@ -3,19 +3,17 @@ import json
 import datetime
 from google.adk.agents import Agent
 
-# Import your existing agent logic
+# Importing the 4 agents
 from .agent1_sorter import sort_files, extract_header_text
 from .agent2_ranking import analyze_course
 from .agent3_scheduler import generate_schedule
 from .agent4_confirming import audit_schedule
 
+# Handles the entire app process
 def run_study_planner_tool(user_hints: str, user_constraints: str, end_date: str) -> str:
-    """
-    Orchestrates the entire study plan generation process.
-    """
     print("\n🚀 [ADK] Starting Planner Workflow...")
     
-    # --- 1. ROBUST FILE PATH CONFIGURATION ---
+    # Determining file paths
     current_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.abspath(os.path.join(current_dir, '..'))
     
@@ -39,8 +37,7 @@ def run_study_planner_tool(user_hints: str, user_constraints: str, end_date: str
 
     print(f"   -> Found {len(pdf_files)} PDFs.")
     
-    # --- 2. DATE SANITIZATION (The Safety Net) ---
-    # This logic protects you even if the Agent hallucinates the wrong year.
+    # Ensure that the bot knows the correct date since during teseting it kept hallucinating dates
     start_date = datetime.date.today().strftime("%Y-%m-%d")
     is_valid_date = False
 
@@ -48,7 +45,7 @@ def run_study_planner_tool(user_hints: str, user_constraints: str, end_date: str
         try:
             s = datetime.datetime.strptime(start_date, "%Y-%m-%d")
             e = datetime.datetime.strptime(end_date, "%Y-%m-%d")
-            # Only accept the date if it is in the future
+            # Only accepts dates in the future
             if e > s:
                 is_valid_date = True
             else:
@@ -64,15 +61,15 @@ def run_study_planner_tool(user_hints: str, user_constraints: str, end_date: str
 
     print(f"   🗓️ Planning Horizon: {start_date} to {end_date}")
 
-    # --- 3. EXECUTE AGENT PIPELINE ---
+    # Executing all 4 agents
 
-    # (Agent 1) Sort
+    # (Agent 1) Sorting
     print("   -> Running Sorter...")
     sorted_courses = sort_files(pdf_files, user_hints)
     if not sorted_courses: return "Failed to sort files."
 
-    # (Agent 2) Analyze
-    print("   -> Running Analyst...")
+    # (Agent 2) Ranking
+    print("   -> Running Ranker...")
     all_course_data = []
     course_list_str = ", ".join([c for c in sorted_courses.keys() if c != "General_Items"])
     
@@ -88,7 +85,7 @@ def run_study_planner_tool(user_hints: str, user_constraints: str, end_date: str
         difficulty = analyze_course(course_name, structured_context, course_list_str, user_constraints)
         all_course_data.append({"course": course_name, "analysis": difficulty})
 
-    # (Agent 3 & 4) Schedule Loop
+    # (Agent 3 & 4) Feedback loop between the schedule maker and the confirmer
     print("   -> Entering Schedule/Audit Loop...")
     max_retries = 3
     attempt = 1
@@ -106,7 +103,7 @@ def run_study_planner_tool(user_hints: str, user_constraints: str, end_date: str
             current_constraints += f" [CORRECTION: {feedback}]"
             attempt += 1
 
-    # --- 4. CONSTRUCT MARKDOWN OUTPUT ---
+    # Markdown output
     markdown_output = f"# 📅 Final Exam Study Plan\n\n"
     markdown_output += f"### 🛡️ Auditor Report (Agent 4)\n"
     status_icon = "✅" if "approved" in feedback.lower() else "⚠️"
@@ -136,7 +133,7 @@ def run_study_planner_tool(user_hints: str, user_constraints: str, end_date: str
                 markdown_output += f"| **{t_time}** | {icon} {t_type} | {t_task} |\n"
             markdown_output += "\n---\n\n"
 
-    # --- 5. SAVE ARTIFACTS TO DISK ---
+    # Saving generated outputs to files
     print(f"   -> Saving markdown to {output_md_path}...")
     with open(output_md_path, "w") as f:
         f.write(markdown_output)
@@ -148,8 +145,6 @@ def run_study_planner_tool(user_hints: str, user_constraints: str, end_date: str
     return markdown_output
 
 # --- DEFINE THE ADK AGENT ---
-# The logic inside run_study_planner_tool handles the date safety now.
-# We keep the agent definition simple to satisfy Pydantic.
 root_agent = Agent(
     name="study_planner_agent",
     model="gemini-3-flash-preview", 
