@@ -1,5 +1,9 @@
 # 🎓 Final.AI - Exam Study Planner
 
+### Demo Video
+
+[![Watch the video](https://img.youtube.com/vi/ATX296b2BUc/hqdefault.jpg)](https://youtu.be/ATX296b2BUc)
+
 ### **1. How to Run the Program**
 
 **Prerequisites**
