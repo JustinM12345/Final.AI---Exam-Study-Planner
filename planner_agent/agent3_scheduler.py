@@ -9,15 +9,21 @@ api_key = os.getenv("GOOGLE_API_KEY")
 
 if api_key:
     genai.configure(api_key=api_key)
-    # Using Flash 2.0 (Best balance of speed/intelligence)
     model = genai.GenerativeModel("gemini-3-flash-preview")
 
-# --- YOUR ORIGINAL PROMPT (UNTOUCHED) ---
 SYSTEM_PROMPT = """
 You are an expert Time-Blocking Scheduler. 
 Your goal is to fit ALL provided study tasks into the calendar.
 
-**CRITICAL PRIORITY: COURSE COVERAGE**
+**CRITICAL PRIORITY 1: BIOLOGICAL SKELETON (MANDATORY)**
+Every single day object in your JSON output **MUST** explicitly include these 4 anchors. 
+**DO NOT SKIP THEM TO SAVE SPACE, EVEN ON THE LAST DAY.**
+1.  **Morning Routine:** (e.g., 10:00 - 11:00)
+2.  **LUNCH:** (e.g., 12:00 - 13:00)
+3.  **DINNER:** (e.g., 18:00 - 19:00)
+4.  **SLEEP:** (e.g., 01:00)
+
+**CRITICAL PRIORITY 2: COURSE COVERAGE**
 1.  **YOU MUST SCHEDULE TASKS FOR EVERY SINGLE COURSE LISTED.** 2.  If a course (e.g., PHYS 234) is missing from the output, you have FAILED.
 3.  It is better to squeeze the schedule (reduce breaks) than to skip a course.
 
@@ -43,7 +49,8 @@ Your goal is to fit ALL provided study tasks into the calendar.
         "events": [
             {"time": "07:00 - 08:00", "task": "Morning Routine", "type": "personal"},
             {"time": "08:00 - 10:00", "task": "PHYS 234: Quantum States", "type": "study"},
-            {"time": "12:00 - 13:00", "task": "LUNCH", "type": "meal"}
+            {"time": "12:00 - 13:00", "task": "LUNCH", "type": "meal"},
+            {"time": "01:00", "task": "SLEEP", "type": "personal"}
         ]
     }
   ]
@@ -112,14 +119,13 @@ def generate_schedule(all_course_data, start_date, end_date, user_constraints="N
     ACTION:
     Create the schedule. 
     CRITICAL: Ensure the last 2 days of the plan are 'Review Only' (The Review Buffer).
+    **MANDATORY:** You MUST include Morning Routine, Lunch, Dinner, and Sleep for EVERY DAY from Day 1 to Day {days_available}. Do not get lazy at the end.
     """
     
     try:
-        # Removed strict JSON enforcement to avoid 400 errors, relying on prompt
         response = model.generate_content(SYSTEM_PROMPT + "\n" + user_prompt)
         text = response.text.replace("```json", "").replace("```", "").strip()
         
-        # Find the JSON object in the text
         if "{" in text:
             start = text.find("{")
             end = text.rfind("}") + 1

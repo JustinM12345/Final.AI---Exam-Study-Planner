@@ -20,19 +20,33 @@ SYSTEM_PROMPT = """
 You are an expert Academic Difficulty Analyst. 
 Your goal is to analyze course content to build a realistic study plan.
 
+**CRITICAL: SCOPE ENFORCEMENT (THE "MIDTERM CUTOFF")**
+You will receive text from multiple files (Syllabus, Midterm Overview).
+You must enforce this hierarchy strictly:
+
+1.  **TIER 1 (The Absolute Truth): "Midterm Overview" or "Exam Guide"**
+    * IF you see a file header like `=== Midterm Overview.pdf ===`, **ONLY** schedule the topics explicitly listed in that file's "Coverage" section.
+    * **DELETE RULE:** You must **DISCARD** any topic from the Syllabus that appears *after* the Midterm cutoff.
+    * *Example:* If Midterm covers Ch 1-6, and Syllabus lists Ch 7 (Hydrogen Atom), **DO NOT INCLUDE CH 7.**
+
+2.  **TIER 2 (Fallback): "Syllabus"**
+    * ONLY use the full Syllabus list if *no* Midterm Overview file is provided.
+
 **CRITICAL: RELATIVE DIFFICULTY SCALING**
 You will be given a list of ALL courses the student is taking.
 Compare the CURRENT course to that list.
-1.  **If Current Course is the Hardest (e.g., Quantum Physics):** -   Target Total Hours: **25 - 40 hours**.
+1.  **If Current Course is the Hardest (e.g., Quantum Physics):**
+    -   Target Total Hours: **25 - 40 hours**.
     -   Be generous with time estimates.
 2.  **If Current Course is the Easiest (e.g., Intro Stats, Electives):**
     -   Target Total Hours: **10 - 15 hours**.
     -   Aggressively reduce time. Assume the student just needs to "Review" rather than "Learn".
 
 **PRIORITY RULES:**
-1.  **Scope:** Use "Midterm Review" or "Syllabus" documents to find topics.
+1.  **Scope:** STRICTLY follow the "Midterm Rule" above. Do not hallucinate extra chapters.
 2.  **Volume:** If a topic covers multiple chapters (e.g. "Ch 1-5"), assign a block of 8-12 hours.
-3.  **Multipliers:** -   Math/Physics/Systems: 1.5x (High Focus = true)
+3.  **Multipliers:**
+    -   Math/Physics/Systems: 1.5x (High Focus = true)
     -   Biology/Health/History: 0.7x (High Focus = false)
 
 **OUTPUT FORMAT:**
@@ -47,22 +61,23 @@ Compare the CURRENT course to that list.
 # This is the main function that runs, it will combine the user input + the giant prompt above
 def analyze_course(course_name, structured_context, all_courses_list="None", user_constraints="None"):
     """
-    Analyzes course text with RELATIVE AWARENESS of other courses.
-    Includes a fix for JSON formatting issues.
+    Analyzes course text with RELATIVE AWARENESS and SCOPE ENFORCEMENT.
     """
-    print(f"  -> Agent 2 (Ranker): Analyzing '{course_name}'...")
+    print(f"  -> Agent 2 (Ranker): Analyzing '{course_name}' with Scope Enforcement...")
     
     user_prompt = f"""
     CURRENT COURSE: {course_name}
     OTHER COURSES STUDENT IS TAKING: {all_courses_list}
     USER CONSTRAINTS: {user_constraints}
     
-    FULL COURSE CONTEXT:
-    {structured_context[:30000]} 
+    FULL COURSE CONTEXT (Syllabus + Midterm Files):
+    {structured_context[:60000]} 
     
     TASK: 
-    1. Compare '{course_name}' to the list [{all_courses_list}]. Is it Hard, Medium, or Easy?
-    2. Extract topics and estimate hours based on that Relative Difficulty level.
+    1. Check for a "Midterm Overview" file. 
+    2. If found, define the "Cutoff Chapter" (e.g., Chapter 6).
+    3. **DISCARD** any Syllabus topic that is after that cutoff.
+    4. Estimate hours based on Relative Difficulty (Hard/Medium/Easy).
     """
     
     max_retries = 3
