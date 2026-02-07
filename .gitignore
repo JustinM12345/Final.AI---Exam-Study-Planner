@@ -1,9 +1,19 @@
-.env
-venv/
 __pycache__/
-uploaded_files/
 .DS_Store
 check_models.__pycache__
 check_models.py
-final_study_plan.json
+
+# Security
+.env
+
+# Environments
+venv/
+.venv/
+env/
+
+# Output Artifacts (Don't commit your specific study plan)
 final_study_plan.md
+final_study_plan.json
+
+# User Data
+uploaded_files/

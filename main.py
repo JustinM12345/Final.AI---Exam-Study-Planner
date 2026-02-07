@@ -2,189 +2,211 @@ import os
 import json
 import datetime
 import time
+from dataclasses import dataclass, field
+from typing import List, Dict, Any
 
-# --- IMPORTS ---
-# Ensure your file is named 'agent4_confirming.py' based on your previous message
+# --- IMPORT AGENT SKILLS ---
 from agent1_sorter import sort_files, extract_header_text
 from agent2_ranking import analyze_course
 from agent3_scheduler import generate_schedule
-from agent4_confirming import audit_schedule 
+from agent4_confirming import audit_schedule
 
-def save_as_markdown(schedule_data, audit_feedback, filename="final_study_plan.md"):
-    """
-    Converts the JSON schedule into a pretty Markdown table.
-    Includes the Final Audit Report at the top.
-    """
-    with open(filename, "w") as f:
-        f.write("# 📅 Final Exam Study Plan\n\n")
-        
-        # --- WRITE AUDIT REPORT ---
-        f.write("### 🛡️ Auditor Report (Agent 4)\n")
-        
-        # Check if the feedback indicates approval
-        if "approved" in audit_feedback.lower() or "looks good" in audit_feedback.lower() or "valid" in audit_feedback.lower():
-            f.write(f"> ✅ **STATUS: PASS**\n> {audit_feedback}\n")
-        else:
-            f.write(f"> ⚠️ **STATUS: PASSED WITH WARNINGS**\n> {audit_feedback}\n")
-        
-        f.write("\n---\n")
-        # --------------------------
-        
-        if "schedule" not in schedule_data or not schedule_data["schedule"]:
-            f.write("No schedule generated.")
-            return
+# --- CONFIGURATION ---
+UPLOAD_DIR = "uploaded_files"
+OUTPUT_FILE = "final_study_plan.md"
+MAX_RETRIES = 3
 
-        for day_entry in schedule_data["schedule"]:
-            date = day_entry.get("date", "Unknown Date")
-            day_name = day_entry.get("day_name", "")
+@dataclass
+class PlannerState:
+    """Represents the shared memory/state of the Agent Team."""
+    user_hints: str = None
+    user_constraints: str = "None"
+    start_date: str = None
+    end_date: str = None
+    course_files: Dict = field(default_factory=dict)
+    course_analysis: List[Dict] = field(default_factory=list)
+    draft_schedule: Dict = field(default_factory=dict)
+    feedback_history: List[str] = field(default_factory=list)
+
+class StudyAgentTeam:
+    def __init__(self):
+        self.state = PlannerState()
+        self.setup_environment()
+
+    def setup_environment(self):
+        print("\n===========================================")
+        print("   🎓  FINAL.AI - INTELLIGENT AGENT TEAM   ")
+        print("===========================================\n")
+        
+        if not os.path.exists(UPLOAD_DIR):
+            os.makedirs(UPLOAD_DIR)
+            print(f"📂 Created '{UPLOAD_DIR}'. Please add PDFs and restart.")
+            exit()
+        
+        self.pdf_files = [
+            os.path.join(UPLOAD_DIR, f) 
+            for f in os.listdir(UPLOAD_DIR) 
+            if f.endswith('.pdf')
+        ]
+        
+        if not self.pdf_files:
+            print(f"⚠️  No PDFs found in '{UPLOAD_DIR}'!")
+            exit()
+
+    def get_user_context(self):
+        """Step 0: Human-in-the-Loop Input"""
+        print("--- 🤖 AGENT CONFIGURATION ---")
+        hints = input("1. User Hints (e.g. 'MATH 136' or enter to skip): ")
+        self.state.user_hints = hints.strip() if hints.strip() else None
+
+        constraints = input("2. Personal Constraints (e.g. 'Wake up 11am', 'No Fridays'): ")
+        if constraints.strip():
+            self.state.user_constraints = constraints
+
+        default_end = (datetime.date.today() + datetime.timedelta(days=14)).strftime("%Y-%m-%d")
+        end_input = input(f"3. Target End Date (YYYY-MM-DD) [Default: {default_end}]: ")
+        self.state.end_date = end_input.strip() if end_input.strip() else default_end
+        self.state.start_date = datetime.date.today().strftime("%Y-%m-%d")
+
+    def run_agent_1_sorter(self):
+        """Agent 1: The Librarian"""
+        print("\n🚀 AGENT 1 (Sorter): Organizing knowledge base...")
+        sorted_files = sort_files(self.pdf_files, self.state.user_hints)
+        
+        if not sorted_files:
+            print("❌ Agent 1 failed to identify courses.")
+            exit()
             
-            # Day Header
-            f.write(f"## {day_name}, {date}\n")
+        self.state.course_files = sorted_files
+        print(f"   -> Identified {len(sorted_files)} categories.")
+
+    def run_agent_2_analyst(self):
+        """Agent 2: The Analyst"""
+        print("\n🧠 AGENT 2 (Analyst): Estimating workload & difficulty...")
+        
+        # Context string for relative difficulty scaling
+        course_list_str = ", ".join([c for c in self.state.course_files.keys() if c != "General_Items"])
+        
+        for course_name, file_paths in self.state.course_files.items():
+            if course_name == "General_Items": continue
             
-            # Table Header
-            f.write("| Time | Type | Task |\n")
-            f.write("| :--- | :--- | :--- |\n")
+            print(f"  -> Analying: {course_name}...")
             
-            # Rows
-            for event in day_entry.get("events", []):
-                time = event.get("time", "")
-                task = event.get("task", "")
-                type_ = event.get("type", "").upper()
+            # Build context from files
+            structured_context = ""
+            for path in file_paths:
+                fname = os.path.basename(path)
+                text = extract_header_text(path)
+                structured_context += f"\n\n=== DOC: {fname} ===\n{text}\n=== END DOC ===\n"
+
+            # Execute Skill
+            analysis = analyze_course(
+                course_name, 
+                structured_context, 
+                course_list_str, 
+                self.state.user_constraints
+            )
+            
+            self.state.course_analysis.append({
+                "course": course_name,
+                "analysis": analysis
+            })
+
+    def run_agent_loop_scheduler_auditor(self):
+        """The Feedback Loop: Agent 3 (Architect) <-> Agent 4 (Auditor)"""
+        print(f"\n🗓️  AGENT TEAM: Collaborative Planning ({self.state.start_date} to {self.state.end_date})...")
+        
+        attempt = 1
+        is_valid = False
+        current_constraints = self.state.user_constraints
+        final_feedback = ""
+
+        while attempt <= MAX_RETRIES and not is_valid:
+            print(f"\n   🔄 Iteration {attempt}/{MAX_RETRIES}...")
+            
+            # --- AGENT 3: SCHEDULER ---
+            print("      [Agent 3] Drafting schedule...")
+            self.state.draft_schedule = generate_schedule(
+                self.state.course_analysis, 
+                self.state.start_date, 
+                self.state.end_date, 
+                current_constraints
+            )
+
+            # --- AGENT 4: AUDITOR ---
+            print("      [Agent 4] Reviewing draft against requirements...")
+            is_valid, feedback = audit_schedule(
+                self.state.draft_schedule, 
+                self.state.user_constraints, # Check against original user rules
+                self.state.course_analysis   # Check against original workload requirements
+            )
+            
+            final_feedback = feedback
+            self.state.feedback_history.append(f"Attempt {attempt}: {feedback}")
+
+            if not is_valid:
+                print(f"      ⚠️  REJECTED: {feedback}")
+                print("      🔧  Agent 4 is instructing Agent 3 to fix issues...")
+                # Update constraints with specific correction instructions
+                current_constraints += f" [CORRECTION REQUIRED: {feedback}]"
+                attempt += 1
+            else:
+                print("      ✅ APPROVED.")
+
+        return final_feedback
+
+    def save_artifacts(self, audit_report):
+        """Final Output Generation"""
+        print("\n💾 System: Saving artifacts...")
+        
+        # Save JSON
+        with open("final_study_plan.json", "w") as f:
+            json.dump(self.state.draft_schedule, f, indent=2)
+            
+        # Save Markdown
+        self._generate_markdown(audit_report)
+        print(f"✅ Mission Complete. Plan saved to '{OUTPUT_FILE}'.")
+
+    def _generate_markdown(self, audit_report):
+        """Internal helper to render Markdown"""
+        with open(OUTPUT_FILE, "w") as f:
+            f.write("# 📅 Final Exam Study Plan\n\n")
+            
+            # Auditor Status Header
+            f.write("### 🛡️ Auditor Report (Agent 4)\n")
+            status_icon = "✅" if "approved" in audit_report.lower() else "⚠️"
+            f.write(f"> {status_icon} **STATUS:** {audit_report}\n\n---\n")
+
+            if not self.state.draft_schedule.get("schedule"):
+                f.write("No schedule generated.")
+                return
+
+            for day_entry in self.state.draft_schedule["schedule"]:
+                date = day_entry.get("date", "Unknown")
+                day_name = day_entry.get("day_name", "")
                 
-                # Add an icon based on type
-                icon = "📚"
-                if "BREAK" in type_: icon = "☕"
-                elif "MEAL" in type_: icon = "🍽️"
-                elif "PERSONAL" in type_: icon = "🛌"
-                elif "REVIEW" in type_: icon = "🧠"
-                elif "WAKE" in type_: icon = "☀️"
+                f.write(f"## {day_name}, {date}\n")
+                f.write("| Time | Type | Task |\n| :--- | :--- | :--- |\n")
                 
-                f.write(f"| **{time}** | {icon} {type_} | {task} |\n")
-            
-            f.write("\n---\n\n")
-            
-    print(f"✅ SUCCESS! Plan saved to '{filename}' (Markdown format).")
+                for event in day_entry.get("events", []):
+                    t_time = event.get("time", "")
+                    t_task = event.get("task", "")
+                    t_type = event.get("type", "").upper()
+                    
+                    icon = "📚"
+                    if "BREAK" in t_type: icon = "☕"
+                    elif "MEAL" in t_type: icon = "🍽️"
+                    elif "PERSONAL" in t_type or "WAKE" in t_type: icon = "🛌"
+                    elif "REVIEW" in t_type: icon = "🧠"
+                    
+                    f.write(f"| **{t_time}** | {icon} {t_type} | {t_task} |\n")
+                f.write("\n---\n\n")
 
-def main():
-    print("\n===========================================")
-    print("   🎓  FINAL.AI - SELF-HEALING SYSTEM  🎓")
-    print("===========================================\n")
-    
-    # --- STEP 0: SETUP ---
-    files_dir = "uploaded_files" 
-    
-    if not os.path.exists(files_dir):
-        os.makedirs(files_dir)
-        print(f"📂 Created folder '{files_dir}'. Put PDFs inside and run again.")
-        return
-
-    pdf_files = [os.path.join(files_dir, f) for f in os.listdir(files_dir) if f.endswith('.pdf')]
-    if not pdf_files:
-        print(f"⚠️  No PDFs found in '{files_dir}'!")
-        return
-
-    # --- STEP 1: USER INPUT ---
-    print("--- 🤖 CONFIGURATION ---")
-    
-    user_input = input("1. User Hints (e.g. 'MATH 136' or enter to skip): ")
-    user_hints = user_input if user_input.strip() != "" else None
-
-    print("2. Personal Constraints (e.g. 'I wake up at 11am', 'No Fridays'):")
-    user_constraints = input("   > ")
-    if user_constraints.strip() == "":
-        user_constraints = "None"
-
-    # Default end date: 14 days from now
-    default_end = (datetime.date.today() + datetime.timedelta(days=14)).strftime("%Y-%m-%d")
-    end_date = input(f"3. Target End Date (YYYY-MM-DD) [Default: {default_end}]: ")
-    if end_date.strip() == "":
-        end_date = default_end
-    
-    start_date = datetime.date.today().strftime("%Y-%m-%d")
-
-    # --- STEP 2: RUN AGENT 1 (Sort Files) ---
-    print("\n🚀 AGENT 1: Sorting Files...")
-    sorted_courses = sort_files(pdf_files, user_hints)
-    
-    if not sorted_courses:
-        print("❌ No courses identified.")
-        return
-        
-    print(f"   -> Identified {len(sorted_courses)} categories.")
-
-    # --- STEP 3: RUN AGENT 2 (Analyze Difficulty) ---
-    print("\n🧠 AGENT 2: Analyzing Content & Estimating Time...")
-    
-    all_course_data = []
-    # Create a simple string list of courses for relative difficulty scaling
-    course_list_str = ", ".join([c for c in sorted_courses.keys() if c != "General_Items"])
-    
-    for i, (course_name, file_paths) in enumerate(sorted_courses.items()):
-        if course_name == "General_Items":
-            continue 
-            
-        print(f"  -> Processing Course: {course_name} ({len(file_paths)} files)")
-        
-        structured_context = ""
-        for path in file_paths:
-            filename = os.path.basename(path)
-            raw_text = extract_header_text(path)
-            structured_context += f"\n\n=== START OF DOCUMENT: {filename} ===\n"
-            structured_context += raw_text
-            structured_context += f"\n=== END OF DOCUMENT: {filename} ===\n"
-
-        # Call Agent 2
-        difficulty_data = analyze_course(course_name, structured_context, course_list_str, user_constraints)
-        
-        all_course_data.append({
-            "course": course_name,
-            "analysis": difficulty_data
-        })
-
-    # --- STEP 4: THE SELF-HEALING LOOP (Agent 3 + Agent 4) ---
-    print(f"\n🗓️  AGENT 3 & 4: Building & Auditing Calendar...")
-    
-    max_retries = 3
-    attempt = 1
-    is_valid = False
-    current_constraints = user_constraints # Start with basic user rules
-    final_schedule = {}
-    last_feedback = ""
-
-    while attempt <= max_retries and not is_valid:
-        print(f"\n   🔄 Attempt {attempt}/{max_retries}: Generating Schedule...")
-        
-        # 1. Run Scheduler (Agent 3)
-        final_schedule = generate_schedule(all_course_data, start_date, end_date, current_constraints)
-        
-        # 2. Run Auditor (Agent 4)
-        # CRITICAL UPDATE: We pass 'all_course_data' so Agent 4 knows what courses are REQUIRED.
-        is_valid, feedback = audit_schedule(final_schedule, current_constraints, all_course_data)
-        
-        last_feedback = feedback
-        
-        if not is_valid:
-            print(f"      ⚠️ Auditor Rejected: {feedback}")
-            print("      🔧 Agent 4 is rewriting instructions for Agent 3...")
-            
-            # THE FEEDBACK LOOP: Pass the Auditor's specific complaints as new constraints
-            # This forces Agent 3 to fix exactly what Agent 4 complained about.
-            current_constraints += f" [IMPORTANT CORRECTION FROM AUDITOR: {feedback}]"
-            attempt += 1
-        else:
-            print("      ✅ Auditor Approved!")
-
-    # --- STEP 5: SAVE RESULTS ---
-    print("\n💾 Saving Final Plan...")
-    
-    # 1. Save Raw JSON (Useful for debugging)
-    with open("final_study_plan.json", "w") as f:
-        json.dump(final_schedule, f, indent=2)
-
-    # 2. Save Markdown with Audit Report (The requirement)
-    save_as_markdown(final_schedule, last_feedback, "final_study_plan.md")
-    
-    print("Done!")
-
+# --- ENTRY POINT ---
 if __name__ == "__main__":
-    main()
+    system = StudyAgentTeam()
+    system.get_user_context()
+    system.run_agent_1_sorter()
+    system.run_agent_2_analyst()
+    final_report = system.run_agent_loop_scheduler_auditor()
+    system.save_artifacts(final_report)

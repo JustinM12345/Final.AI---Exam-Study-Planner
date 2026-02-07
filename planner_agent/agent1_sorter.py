@@ -10,7 +10,7 @@ api_key = os.getenv("GOOGLE_API_KEY")
 # Using Gemini 3.0 Flash
 if api_key:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("models/gemini-3-flash-preview")  
+    model = genai.GenerativeModel("gemini-3-flash-preview")  
 
 # Reads the first 4 pages of the pdf (or all the pages in the pdf) in an attempt to find the course code or title
 def extract_header_text(pdf_path):

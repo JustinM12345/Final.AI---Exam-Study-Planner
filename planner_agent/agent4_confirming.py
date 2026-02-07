@@ -10,7 +10,7 @@ if api_key:
     genai.configure(api_key=api_key)
     # Using the smart model (Flash 2.0) for high-level reasoning
     model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash", 
+        model_name="gemini-3-flash-preview", 
         generation_config={"response_mime_type": "application/json"}
     )
 

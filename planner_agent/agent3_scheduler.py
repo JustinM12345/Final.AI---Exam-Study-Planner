@@ -9,11 +9,10 @@ api_key = os.getenv("GOOGLE_API_KEY")
 
 if api_key:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(
-        model_name="gemini-3-flash-preview", 
-        generation_config={"response_mime_type": "application/json"}
-    )
+    # Using Flash 2.0 (Best balance of speed/intelligence)
+    model = genai.GenerativeModel("gemini-3-flash-preview")
 
+# --- YOUR ORIGINAL PROMPT (UNTOUCHED) ---
 SYSTEM_PROMPT = """
 You are an expert Time-Blocking Scheduler. 
 Your goal is to fit ALL provided study tasks into the calendar.
@@ -54,26 +53,52 @@ Your goal is to fit ALL provided study tasks into the calendar.
 def generate_schedule(all_course_data, start_date, end_date, user_constraints="None"):
     print(f"  -> Agent 3 (Scheduler): Building plan from {start_date} to {end_date}...")
     
-    # 1. Grabbing current date for context
-    today = datetime.date.today().strftime("%Y-%m-%d")
+    # 1. Calculate Duration (To prevent the 1-day cram bug)
+    try:
+        start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+        days_available = (end_dt - start_dt).days + 1
+    except ValueError:
+        days_available = 14 # Fallback default
     
     # 2. Prepare the Task List
     tasks_summary = ""
+    total_est_hours = 0
+    
     for course_entry in all_course_data:
         c_name = course_entry['course']
         analysis = course_entry['analysis']
         if isinstance(analysis, list): analysis = analysis[0]
         
         topics = analysis.get('topics', [])
-        
         tasks_summary += f"\nCOURSE: {c_name}\n"
         for t in topics:
-            tasks_summary += f" - {t['topic']} (Need: {t['est_hours']}h) [High Focus: {t.get('high_focus')}]\n"
+            h = t.get('est_hours', 1)
+            total_est_hours += h
+            tasks_summary += f" - {t['topic']} (Need: {h}h) [High Focus: {t.get('high_focus')}]\n"
 
-    # 3. Building final prompt
+    # --- LOGIC INJECTION: The "Safety Valve" ---
+    # This checks if the math is impossible before asking the AI.
+    daily_avg = total_est_hours / max(1, days_available)
+    safety_instruction = ""
+    
+    if daily_avg > 9:
+        print(f"    ⚠️  Workload Alert: {daily_avg:.1f} hours/day required. Injecting strict limits.")
+        safety_instruction = f"""
+        **⚠️ CRITICAL RESOURCE WARNING ⚠️**
+        The user has {total_est_hours} hours of work but only {days_available} days.
+        This averages to {daily_avg:.1f} hours/day, which is physically impossible without burnout.
+        
+        **UPDATED STRATEGY:**
+        1.  **CAP DAILY STUDY AT 9 HOURS MAX.** Do not schedule more, even if tasks are left over.
+        2.  **Triaging:** Prioritize 'High Focus' tasks. 
+        3.  **Review Tasks:** Cut 'Review' time in half to save space.
+        """
+
+    # 3. Building final prompt (Your Original + The Safety Instruction)
     user_prompt = f"""
-    CURRENT DATE: {today}
-    PLANNING RANGE: {start_date} to {end_date}
+    CURRENT DATE: {start_date}
+    PLANNING RANGE: {start_date} to {end_date} ({days_available} days)
     
     *** USER CUSTOMIZATION ***:
     "{user_constraints}" 
@@ -82,14 +107,26 @@ def generate_schedule(all_course_data, start_date, end_date, user_constraints="N
     TASKS TO SCHEDULE:
     {tasks_summary}
     
+    {safety_instruction}
+    
     ACTION:
     Create the schedule. 
     CRITICAL: Ensure the last 2 days of the plan are 'Review Only' (The Review Buffer).
     """
     
     try:
+        # Removed strict JSON enforcement to avoid 400 errors, relying on prompt
         response = model.generate_content(SYSTEM_PROMPT + "\n" + user_prompt)
-        return json.loads(response.text)
+        text = response.text.replace("```json", "").replace("```", "").strip()
+        
+        # Find the JSON object in the text
+        if "{" in text:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            return json.loads(text[start:end])
+        else:
+            return json.loads(text) # Attempt direct parse
+            
     except Exception as e:
         print(f"    ❌ Error in Scheduler: {e}")
         return {"schedule": []}
